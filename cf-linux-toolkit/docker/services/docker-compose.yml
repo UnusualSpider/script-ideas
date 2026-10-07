@@ -1,0 +1,67 @@
+# CyberForce - containerized scored services (TEMPLATE)
+# Pin versions to whatever the competition image uses. Mount your REAL config and content
+# read-write so the container serves the same site/data the scoring engine expects.
+# Bring up only the services this box is scored on:  docker compose up -d web db
+#
+# Why containerize: a clean, known-good image is far easier to redeploy than a box the Red
+# team has been living on. If a service is compromised, `docker compose down && up -d` on a
+# pinned image gives you a fresh instance, while your data stays on the mounted volumes.
+#
+# WARNING: stop the host's native service first (systemctl stop apache2) or the port clashes.
+name: cf-services
+
+services:
+  web:
+    image: httpd:2.4            # or nginx:1.27, php:8.3-apache
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./web/html:/usr/local/apache2/htdocs:ro   # your real web root (read-only = tamper-proof)
+      - ./web/conf:/usr/local/apache2/conf/extra:ro
+    read_only: false
+    security_opt: ["no-new-privileges:true"]
+
+  db:
+    image: mariadb:11           # or mysql:8.0, postgres:16
+    restart: unless-stopped
+    ports: ["3306:3306"]
+    environment:
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root
+    volumes:
+      - ./db/data:/var/lib/mysql
+      - ./db/init:/docker-entrypoint-initdb.d:ro  # .sql files loaded on first run
+    secrets: [db_root]
+    security_opt: ["no-new-privileges:true"]
+
+  dns:
+    image: internetsystemsconsortium/bind9:9.20
+    restart: unless-stopped
+    ports: ["53:53/tcp", "53:53/udp"]
+    volumes:
+      - ./dns/etc:/etc/bind:ro
+      - ./dns/zones:/var/lib/bind
+    security_opt: ["no-new-privileges:true"]
+
+  ftp:
+    image: fauria/vsftpd
+    restart: unless-stopped
+    ports: ["21:21", "21100-21110:21100-21110"]
+    environment:
+      PASV_ADDRESS: 0.0.0.0
+      PASV_MIN_PORT: 21100
+      PASV_MAX_PORT: 21110
+    volumes:
+      - ./ftp/data:/home/vsftpd
+    security_opt: ["no-new-privileges:true"]
+
+  mail:
+    image: boky/postfix
+    restart: unless-stopped
+    ports: ["25:587"]
+    environment:
+      ALLOWED_SENDER_DOMAINS: example.com
+    security_opt: ["no-new-privileges:true"]
+
+secrets:
+  db_root:
+    file: ./db/root_password.txt   # create this file, chmod 600
